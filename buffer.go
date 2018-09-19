@@ -40,17 +40,17 @@ func (b *buffer) searchForFrame(offset int64) int {
 }
 
 func (b *buffer) copyData(ctx context.Context, dest []byte, offset int64) (copied int) {
-	if tail := b.size - offset; tail < int64(len(dest)) {
-		dest = dest[:tail]
+	if remain := b.size - offset; remain < int64(len(dest)) {
+		dest = dest[:remain]
 	}
 
 	for len(dest) > 0 {
-		b := b.getData(ctx, offset)
-		if b == nil {
+		data := b.getData(ctx, offset)
+		if data == nil {
 			break
 		}
 
-		n := copy(dest, b)
+		n := copy(dest, data)
 		dest = dest[n:]
 		offset += int64(n)
 		copied += n
@@ -94,12 +94,11 @@ func (b *buffer) getData(ctx context.Context, offset int64) []byte {
 
 func (b *buffer) produceFrame(f Frame) {
 	i := b.searchForFrame(f.Offset)
-	tail := append([]Frame{f}, b.frames[i:]...)
 
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	b.frames = append(b.frames[:i], tail...)
+	b.frames = append(b.frames[:i], append([]Frame{f}, b.frames[i:]...)...)
 	b.cond.Broadcast()
 }
 

@@ -140,11 +140,6 @@ func (fs *fileSystem) ReadFile(ctx context.Context, op *fuseops.ReadFileOp) (err
 		return fuse.EIO
 	}
 
-	if false {
-		op.BytesRead = len(op.Dst)
-		return
-	}
-
 	op.BytesRead = b.copyData(ctx, op.Dst, op.Offset)
 	return
 }
