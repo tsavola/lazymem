@@ -7,7 +7,6 @@ package lazymem
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"syscall"
@@ -18,9 +17,9 @@ import (
 
 // Config for the memory filesystem.
 type Config struct {
-	Mountpoint  string
-	ErrorLogger *log.Logger
-	DebugLogger *log.Logger
+	Mountpoint string
+	ErrorLog   Logger
+	DebugLog   Logger
 }
 
 // Manager of lazy memory.  It is backed by a custom filesystem implementation.
@@ -63,8 +62,8 @@ func New(ctx context.Context, config *Config) (m *Manager, err error) {
 		OpContext:   ctx,
 		FSName:      "lazymem",
 		Subtype:     "lazymem",
-		ErrorLogger: config.ErrorLogger,
-		DebugLogger: config.DebugLogger,
+		ErrorLogger: adaptLogger(config.ErrorLog),
+		DebugLogger: adaptLogger(config.DebugLog),
 	}
 
 	m.mount, err = fuse.Mount(m.Mountpoint, m.server, &mountConfig)

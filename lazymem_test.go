@@ -7,7 +7,6 @@ package lazymem_test
 import (
 	"context"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -59,15 +58,19 @@ func runTester(t *testing.T, fd int, args ...string) {
 
 }
 
+type testLogger struct{ t *testing.T }
+
+func (l testLogger) Printf(format string, v ...interface{}) { l.t.Logf(format, v...) }
+
 func newConfig(t *testing.T) (config *lazymem.Config) {
 	t.Helper()
 
 	config = &lazymem.Config{
-		ErrorLogger: log.New(os.Stderr, t.Name()+": ERROR: ", 0),
+		ErrorLog: testLogger{t},
 	}
 
 	if testing.Verbose() {
-		config.DebugLogger = log.New(os.Stderr, t.Name()+": ", 0)
+		config.DebugLog = testLogger{t}
 	}
 
 	return
