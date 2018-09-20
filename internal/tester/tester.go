@@ -41,8 +41,13 @@ var Tests = map[string]func([]string){
 		}
 	},
 
-	"TestWritePrivate": func(args []string) {
-		mem, err := syscall.Mmap(0, 0, 256*4096, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE)
+	"TestWrite": func(args []string) {
+		flags, err := strconv.Atoi(args[0])
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		mem, err := syscall.Mmap(0, 0, 256*4096, syscall.PROT_READ|syscall.PROT_WRITE, flags)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -44,6 +44,9 @@ func (b *buffer) copyData(ctx context.Context, dest []byte, offset int64) (copie
 		dest = dest[:remain]
 	}
 
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
 	for len(dest) > 0 {
 		data := b.getData(ctx, offset)
 		if data == nil {
@@ -59,17 +62,30 @@ func (b *buffer) copyData(ctx context.Context, dest []byte, offset int64) (copie
 	return
 }
 
-func (b *buffer) getData(ctx context.Context, offset int64) []byte {
+func (b *buffer) replaceData(offset int64, data []byte) {
+	ctx := context.Background()
+
+	if remain := b.size - offset; remain < int64(len(data)) {
+		data = data[:remain]
+	}
+
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
+	for len(data) > 0 {
+		buf := b.getData(ctx, offset)
+		if buf == nil {
+			break
 		}
 
+		n := copy(buf, data)
+		data = data[n:]
+		offset += int64(n)
+	}
+}
+
+func (b *buffer) getData(ctx context.Context, offset int64) []byte {
+	for {
 		i := b.searchForFrame(offset)
 		if i < len(b.frames) {
 			f := b.frames[i]
@@ -86,6 +102,12 @@ func (b *buffer) getData(ctx context.Context, offset int64) []byte {
 
 		if b.noMore {
 			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
 		}
 
 		b.cond.Wait()

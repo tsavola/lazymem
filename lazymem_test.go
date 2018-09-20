@@ -27,10 +27,10 @@ func init() {
 	}
 }
 
-func runTester(t *testing.T, fd int, args ...string) {
+func runTester(t *testing.T, testName string, fd int, args ...string) {
 	t.Helper()
 
-	args = append([]string{goBin, "run", "internal/runtester.go", t.Name()}, args...)
+	args = append([]string{goBin, "run", "internal/runtester.go", testName}, args...)
 
 	pid, err := syscall.ForkExec(goBin, args, &syscall.ProcAttr{
 		Env:   syscall.Environ(),
@@ -117,10 +117,15 @@ func TestDelay(t *testing.T) {
 		}
 	}()
 
-	runTester(t, fd)
+	runTester(t, t.Name(), fd)
 }
 
-func TestWritePrivate(t *testing.T) {
+func TestWritePrivate(t *testing.T) { testWrite(t, syscall.MAP_PRIVATE) }
+func TestWriteShared(t *testing.T)  { testWrite(t, syscall.MAP_SHARED) }
+
+func testWrite(t *testing.T, flags int) {
+	t.Helper()
+
 	ctx := context.Background()
 
 	mm, err := lazymem.New(ctx, newConfig(t))
@@ -153,7 +158,7 @@ func TestWritePrivate(t *testing.T) {
 		}
 	}()
 
-	runTester(t, fd)
+	runTester(t, "TestWrite", fd, strconv.Itoa(flags))
 }
 
 func TestHTTPGet(t *testing.T) {
@@ -211,5 +216,5 @@ func TestHTTPGet(t *testing.T) {
 	}
 	defer syscall.Close(fd)
 
-	runTester(t, fd, strconv.Itoa(int(resp.ContentLength)))
+	runTester(t, t.Name(), fd, strconv.Itoa(int(resp.ContentLength)))
 }

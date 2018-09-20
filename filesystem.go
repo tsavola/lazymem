@@ -120,6 +120,10 @@ func (fs *fileSystem) GetInodeAttributes(ctx context.Context, op *fuseops.GetIno
 	return
 }
 
+func (fs *fileSystem) SetInodeAttributes(context.Context, *fuseops.SetInodeAttributesOp) error {
+	return nil
+}
+
 func (fs *fileSystem) OpenFile(ctx context.Context, op *fuseops.OpenFileOp) (err error) {
 	fs.lock.Lock()
 	_, found := fs.nodes[op.Inode]
@@ -141,6 +145,18 @@ func (fs *fileSystem) ReadFile(ctx context.Context, op *fuseops.ReadFileOp) (err
 	}
 
 	op.BytesRead = b.copyData(ctx, op.Dst, op.Offset)
+	return
+}
+
+func (fs *fileSystem) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) (err error) {
+	fs.lock.Lock()
+	b, found := fs.nodes[op.Inode]
+	fs.lock.Unlock()
+	if !found {
+		return fuse.EIO
+	}
+
+	b.replaceData(op.Offset, op.Data)
 	return
 }
 

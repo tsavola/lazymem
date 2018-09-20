@@ -96,8 +96,6 @@ func (m *Manager) cleanup() (err error) {
 
 // Create a file with given size and data source.  The file descriptor should
 // be passed to another process for memory-mapping.
-//
-// Currently only private memory mappings are supported.
 func (m *Manager) Create(size int64, mode int, data <-chan Frame) (fd int, err error) {
 	b := newBuffer(size)
 	id, name := m.fs.registerBuffer(b)
