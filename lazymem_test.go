@@ -149,6 +149,7 @@ func testWrite(t *testing.T, flags int) {
 
 	fd, err := mm.Create(int64(buf.Len()), syscall.O_RDWR, buf)
 	if err != nil {
+		buf.Close()
 		t.Fatal(err)
 	}
 	defer func() {

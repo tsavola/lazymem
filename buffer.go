@@ -39,6 +39,8 @@ type buffer struct {
 // Create a file descriptor which should be passed to another process for
 // memory mapping.  The memory can be mapped multiple times as PROT_SHARED
 // and/or PROT_PRIVATE.
+//
+// In case of failure, no SharedBuffer methods have been invoked.
 func (m *Manager) Create(size int64, mode int, b SharedBuffer) (fd int, err error) {
 	return m.create(buffer{size, b.ReadAt, b.WriteAt, b.Close}, mode)
 }
@@ -46,6 +48,8 @@ func (m *Manager) Create(size int64, mode int, b SharedBuffer) (fd int, err erro
 // CreateCloned memory file descriptor which should be passed to another
 // process for mapping.  The memory can be mapped multiple times as
 // PROT_PRIVATE.
+//
+// In case of failure, no ClosedBuffer methods have been invoked.
 func (m *Manager) CreateCloned(size int64, mode int, b ClonedBuffer) (fd int, err error) {
 	return m.create(buffer{size, b.ReadAt, noWriteAt, b.Close}, mode)
 }
@@ -62,7 +66,6 @@ func (m *Manager) create(b buffer, mode int) (fd int, err error) {
 	m.fs.forgetBufferName(name)
 	if err != nil {
 		m.fs.forgetBufferNode(id)
-		b.close()
 	}
 	return
 }
