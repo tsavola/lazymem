@@ -19,7 +19,14 @@ import (
 	"github.com/jacobsa/fuse/fuseutil"
 )
 
-var never = time.Now().Add(time.Hour * 24 * 365 * 200)
+const (
+	statIoSize = 131072
+)
+
+var (
+	pagesize = os.Getpagesize()
+	never    = time.Now().Add(time.Hour * 24 * 365 * 200)
+)
 
 type fileSystem struct {
 	fuseutil.NotImplementedFileSystem
@@ -64,6 +71,7 @@ func (fs *fileSystem) registerBuffer(b buffer) (id fuseops.InodeID, name string)
 	fs.nodes[id] = b
 	fs.names[name] = id
 	fs.lastId = id
+	fs.pages += countPages(b.size)
 	return
 }
 
@@ -78,6 +86,7 @@ func (fs *fileSystem) forgetBufferNode(id fuseops.InodeID) {
 	fs.lock.Lock()
 	defer fs.lock.Unlock()
 
+	fs.pages -= countPages(fs.nodes[id].size)
 	delete(fs.nodes, id)
 }
 
@@ -88,6 +97,17 @@ func (fs *fileSystem) bufferAttributes(size int64) fuseops.InodeAttributes {
 		Uid:  fs.uid,
 		Gid:  fs.gid,
 	}
+}
+
+func (fs *fileSystem) StatFS(ctx context.Context, op *fuseops.StatFSOp) (err error) {
+	fs.lock.Lock()
+	defer fs.lock.Unlock()
+
+	op.BlockSize = uint32(pagesize)
+	op.Blocks = uint64(fs.pages)
+	op.IoSize = statIoSize
+	op.Inodes = uint64(len(fs.nodes)) + 1
+	return
 }
 
 func (fs *fileSystem) LookUpInode(ctx context.Context, op *fuseops.LookUpInodeOp) (err error) {
@@ -218,4 +238,8 @@ func adjustLen(ioBuf []byte, ioOffset, availSize int64) []byte {
 		ioBuf = ioBuf[:n]
 	}
 	return ioBuf
+}
+
+func countPages(size int64) uint64 {
+	return (uint64(size) + uint64(pagesize-1)) / uint64(pagesize)
 }
