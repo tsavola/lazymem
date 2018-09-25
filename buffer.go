@@ -5,137 +5,64 @@
 package lazymem
 
 import (
-	"context"
-	"sort"
-	"sync"
+	"io"
+	"path"
+	"syscall"
 )
 
-// Frame of memory contents.
-type Frame struct {
-	Offset int64
-	Data   []byte
+// TemporalBuffer's content will be read at most once (per range).
+type TemporalBuffer interface {
+	io.ReaderAt
+}
+
+// ClonedBuffer's content may be read repeatedly.
+type ClonedBuffer interface {
+	io.ReaderAt
+	io.Closer
+}
+
+// SharedBuffer's content may be overwritten.  A range won't be written to
+// before it has been read at least once.
+type SharedBuffer interface {
+	io.ReaderAt
+	io.WriterAt
+	io.Closer
 }
 
 type buffer struct {
-	size int64
-
-	lock   sync.Mutex
-	cond   sync.Cond
-	frames []Frame
-	noMore bool
+	size    int64
+	readAt  func(target []byte, sourceOffset int64) (n int, err error)
+	writeAt func(source []byte, targetOffset int64) (n int, err error)
+	close   func() error
 }
 
-func newBuffer(size int64) (b *buffer) {
-	b = &buffer{
-		size: size,
+// Create a file descriptor which should be passed to another process for
+// memory mapping.  The memory can be mapped multiple times as PROT_SHARED
+// and/or PROT_PRIVATE.
+func (m *Manager) Create(size int64, mode int, b SharedBuffer) (fd int, err error) {
+	return m.create(buffer{size, b.ReadAt, b.WriteAt, b.Close}, mode)
+}
+
+// CreateCloned memory file descriptor which should be passed to another
+// process for mapping.  The memory can be mapped multiple times as
+// PROT_PRIVATE.
+func (m *Manager) CreateCloned(size int64, mode int, b ClonedBuffer) (fd int, err error) {
+	return m.create(buffer{size, b.ReadAt, noWriteAt, b.Close}, mode)
+}
+
+// CreateTemporal memory file descriptor which should be passed to another
+// process for mapping.  The memory can be mapped once as PROT_PRIVATE.
+func (m *Manager) CreateTemporal(size int64, mode int, b TemporalBuffer) (fd int, err error) {
+	return m.create(buffer{size, b.ReadAt, noWriteAt, noClose}, mode)
+}
+
+func (m *Manager) create(b buffer, mode int) (fd int, err error) {
+	id, name := m.fs.registerBuffer(b)
+	fd, err = syscall.Open(path.Join(m.Mountpoint, name), mode, 0)
+	m.fs.forgetBufferName(name)
+	if err != nil {
+		m.fs.forgetBufferNode(id)
+		b.close()
 	}
-	b.cond.L = &b.lock
 	return
-}
-
-func (b *buffer) searchForFrame(offset int64) int {
-	return sort.Search(len(b.frames), func(i int) bool {
-		return b.frames[i].Offset >= offset
-	})
-}
-
-func (b *buffer) copyData(ctx context.Context, dest []byte, offset int64) (copied int) {
-	if remain := b.size - offset; remain < int64(len(dest)) {
-		dest = dest[:remain]
-	}
-
-	b.lock.Lock()
-	defer b.lock.Unlock()
-
-	for len(dest) > 0 {
-		data := b.getData(ctx, offset)
-		if data == nil {
-			break
-		}
-
-		n := copy(dest, data)
-		dest = dest[n:]
-		offset += int64(n)
-		copied += n
-	}
-
-	return
-}
-
-func (b *buffer) replaceData(offset int64, data []byte) {
-	ctx := context.Background()
-
-	if remain := b.size - offset; remain < int64(len(data)) {
-		data = data[:remain]
-	}
-
-	b.lock.Lock()
-	defer b.lock.Unlock()
-
-	for len(data) > 0 {
-		buf := b.getData(ctx, offset)
-		if buf == nil {
-			break
-		}
-
-		n := copy(buf, data)
-		data = data[n:]
-		offset += int64(n)
-	}
-}
-
-func (b *buffer) getData(ctx context.Context, offset int64) []byte {
-	for {
-		i := b.searchForFrame(offset)
-		if i < len(b.frames) {
-			f := b.frames[i]
-			if o := offset - f.Offset; o >= 0 && o < int64(len(f.Data)) {
-				return f.Data[o:]
-			}
-		}
-		if i > 0 {
-			f := b.frames[i-1]
-			if o := offset - f.Offset; o >= 0 && o < int64(len(f.Data)) {
-				return f.Data[o:]
-			}
-		}
-
-		if b.noMore {
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		b.cond.Wait()
-	}
-}
-
-func (b *buffer) produceFrame(f Frame) {
-	i := b.searchForFrame(f.Offset)
-
-	b.lock.Lock()
-	defer b.lock.Unlock()
-
-	b.frames = append(b.frames[:i], append([]Frame{f}, b.frames[i:]...)...)
-	b.cond.Broadcast()
-}
-
-func (b *buffer) noMoreFrames() {
-	b.lock.Lock()
-	defer b.lock.Unlock()
-
-	b.noMore = true
-	b.cond.Broadcast()
-}
-
-func buffering(b *buffer, data <-chan Frame) {
-	defer b.noMoreFrames()
-
-	for f := range data {
-		b.produceFrame(f)
-	}
 }

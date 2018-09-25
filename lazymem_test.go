@@ -16,6 +16,8 @@ import (
 
 	"github.com/tsavola/lazymem"
 	_ "github.com/tsavola/lazymem/internal/tester" // cache workaround
+	"github.com/tsavola/lazymem/linear"
+	"github.com/tsavola/lazymem/sparse"
 )
 
 var goBin string
@@ -27,7 +29,13 @@ func init() {
 	}
 }
 
-func runTester(t *testing.T, testName string, fd int, args ...string) {
+type tOrB interface {
+	Helper()
+	Logf(string, ...interface{})
+	Fatal(...interface{})
+}
+
+func runTester(t tOrB, testName string, fd int, args ...string) {
 	t.Helper()
 
 	args = append([]string{goBin, "run", "internal/runtester.go", testName}, args...)
@@ -58,18 +66,18 @@ func runTester(t *testing.T, testName string, fd int, args ...string) {
 
 }
 
-type testLogger struct{ t *testing.T }
+type testLogger struct{ tOrB }
 
-func (l testLogger) Printf(format string, v ...interface{}) { l.t.Logf(format, v...) }
+func (l testLogger) Printf(format string, v ...interface{}) { l.tOrB.Logf(format, v...) }
 
-func newConfig(t *testing.T) (config *lazymem.Config) {
+func newConfig(t tOrB, debug bool) (config *lazymem.Config) {
 	t.Helper()
 
 	config = &lazymem.Config{
 		ErrorLog: testLogger{t},
 	}
 
-	if testing.Verbose() {
+	if debug {
 		config.DebugLog = testLogger{t}
 	}
 
@@ -79,7 +87,7 @@ func newConfig(t *testing.T) (config *lazymem.Config) {
 func TestDelay(t *testing.T) {
 	ctx := context.Background()
 
-	mm, err := lazymem.New(ctx, newConfig(t))
+	mm, err := lazymem.New(ctx, newConfig(t, testing.Verbose()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,10 +97,19 @@ func TestDelay(t *testing.T) {
 		}
 	}()
 
-	data := make(chan lazymem.Frame)
+	buf := sparse.Buf()
+	fd, err := mm.CreateTemporal(256*4096, syscall.O_RDONLY, buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := syscall.Close(fd); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	go func() {
-		defer close(data)
+		defer buf.ProductionFinished()
 
 		for i := 0; i < 256; i++ {
 			time.Sleep(time.Millisecond)
@@ -100,20 +117,7 @@ func TestDelay(t *testing.T) {
 			b := make([]byte, 4096)
 			b[0] = byte(i)
 
-			data <- lazymem.Frame{
-				Offset: int64(i) * 4096,
-				Data:   b,
-			}
-		}
-	}()
-
-	fd, err := mm.Create(256*4096, syscall.O_RDONLY, data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := syscall.Close(fd); err != nil {
-			t.Error(err)
+			buf.ProduceFrame(b, int64(i)*4096)
 		}
 	}()
 
@@ -128,7 +132,7 @@ func testWrite(t *testing.T, flags int) {
 
 	ctx := context.Background()
 
-	mm, err := lazymem.New(ctx, newConfig(t))
+	mm, err := lazymem.New(ctx, newConfig(t, testing.Verbose()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,23 +142,34 @@ func testWrite(t *testing.T, flags int) {
 		}
 	}()
 
-	data := make(chan lazymem.Frame)
-
-	go func() {
-		defer close(data)
-
-		data <- lazymem.Frame{
-			Data: make([]byte, 256*4096),
-		}
+	buf := linear.Buf(make([]byte, 256*4096))
+	defer func() {
+		<-buf.Closed()
 	}()
 
-	fd, err := mm.Create(256*4096, syscall.O_RDWR, data)
+	fd, err := mm.Create(int64(buf.Len()), syscall.O_RDWR, buf)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		if err := syscall.Close(fd); err != nil {
 			t.Error(err)
+		}
+	}()
+
+	go func() {
+		defer buf.PopulationFinished()
+		b := buf.Bytes()
+
+		for i := 0; i < buf.Len()/linear.BlockSize; i++ {
+			time.Sleep(100 * time.Millisecond)
+
+			for j := 0; j < linear.BlockSize; j++ {
+				b[j] = byte(i + j)
+			}
+
+			b = b[linear.BlockSize:]
+			buf.BlockPopulated(i)
 		}
 	}()
 
@@ -169,7 +184,7 @@ func TestHTTPGet(t *testing.T) {
 
 	ctx := context.Background()
 
-	mm, err := lazymem.New(ctx, newConfig(t))
+	mm, err := lazymem.New(ctx, newConfig(t, testing.Verbose()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,36 +200,35 @@ func TestHTTPGet(t *testing.T) {
 		t.Fatal(resp.ContentLength)
 	}
 
-	data := make(chan lazymem.Frame)
-
-	go func() {
-		defer close(data)
-
-		for offset := int64(0); offset < resp.ContentLength; offset += 131072 {
-			readlen := resp.ContentLength - offset
-			if readlen > 131072 {
-				readlen = 131072
-			}
-
-			b := make([]byte, 131072)
-
-			if _, err := io.ReadFull(resp.Body, b[:readlen]); err != nil {
-				t.Error(err)
-				return
-			}
-
-			data <- lazymem.Frame{
-				Offset: offset,
-				Data:   b,
-			}
-		}
-	}()
-
-	fd, err := mm.Create(resp.ContentLength, syscall.O_RDONLY, data)
+	buf := sparse.Buf()
+	fd, err := mm.CreateTemporal(resp.ContentLength, syscall.O_RDONLY, buf)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer syscall.Close(fd)
+
+	go func() {
+		defer buf.ProductionFinished()
+
+		var offset int64
+		for offset < resp.ContentLength {
+			n := int64(150023)
+
+			if remain := resp.ContentLength - offset; remain < n {
+				n = remain
+			}
+
+			b := make([]byte, n)
+
+			if _, err := io.ReadFull(resp.Body, b); err != nil {
+				t.Error(err)
+				break
+			}
+
+			buf.ProduceFrame(b, offset)
+			offset += int64(len(b))
+		}
+	}()
 
 	runTester(t, t.Name(), fd, strconv.Itoa(int(resp.ContentLength)))
 }

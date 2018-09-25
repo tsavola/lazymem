@@ -11,10 +11,13 @@ import (
 	"image/png"
 	"log"
 	"os"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
 )
+
+const BenchmarkSize = 128 * 1024 * 1024
 
 var Tests = map[string]func([]string){
 	"TestDelay": func(args []string) {
@@ -58,7 +61,7 @@ var Tests = map[string]func([]string){
 		}()
 
 		for i := 0; i < 256*4096; i++ {
-			mem[i] = byte(i)
+			mem[i]++
 		}
 	},
 
@@ -89,6 +92,30 @@ var Tests = map[string]func([]string){
 			if err := png.Encode(f, image); err != nil {
 				log.Fatal(err)
 			}
+		}
+	},
+
+	"BenchmarkSharedRead": func(args []string) {
+		mem, err := syscall.Mmap(0, 0, BenchmarkSize, syscall.PROT_READ, syscall.MAP_SHARED)
+		if err != nil {
+			log.Fatal(err)
+		}
+		// no explicit munmap
+
+		for i := 0; i < BenchmarkSize; i += 16 {
+			runtime.KeepAlive(mem[i])
+		}
+	},
+
+	"BenchmarkSharedWrite": func(args []string) {
+		mem, err := syscall.Mmap(0, 0, BenchmarkSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+		if err != nil {
+			log.Fatal(err)
+		}
+		// no explicit munmap
+
+		for i := 0; i < BenchmarkSize; i += 16 {
+			mem[i] = 1
 		}
 	},
 }

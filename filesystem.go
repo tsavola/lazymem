@@ -18,30 +18,28 @@ import (
 
 var never = time.Now().Add(time.Hour * 24 * 365 * 200)
 
-type nodeId = fuseops.InodeID
-
 type fileSystem struct {
 	fuseutil.NotImplementedFileSystem
 	uid uint32
 	gid uint32
 
 	lock   sync.Mutex
-	nodes  map[nodeId]*buffer
-	names  map[string]nodeId
-	lastId nodeId
+	nodes  map[fuseops.InodeID]buffer
+	names  map[string]fuseops.InodeID
+	lastId fuseops.InodeID
 }
 
 func newFileSystem() *fileSystem {
 	return &fileSystem{
 		uid:    uint32(os.Getuid()),
 		gid:    uint32(os.Getgid()),
-		nodes:  make(map[nodeId]*buffer),
-		names:  make(map[string]nodeId),
+		nodes:  make(map[fuseops.InodeID]buffer),
+		names:  make(map[string]fuseops.InodeID),
 		lastId: fuseops.RootInodeID,
 	}
 }
 
-func (fs *fileSystem) registerBuffer(b *buffer) (id nodeId, name string) {
+func (fs *fileSystem) registerBuffer(b buffer) (id fuseops.InodeID, name string) {
 	fs.lock.Lock()
 	defer fs.lock.Unlock()
 
@@ -61,16 +59,16 @@ func (fs *fileSystem) forgetBufferName(name string) {
 	delete(fs.names, name)
 }
 
-func (fs *fileSystem) forgetBufferNode(id nodeId) {
+func (fs *fileSystem) forgetBufferNode(id fuseops.InodeID) {
 	fs.lock.Lock()
 	defer fs.lock.Unlock()
 
 	delete(fs.nodes, id)
 }
 
-func (fs *fileSystem) bufferAttributes(b *buffer) fuseops.InodeAttributes {
+func (fs *fileSystem) bufferAttributes(size int64) fuseops.InodeAttributes {
 	return fuseops.InodeAttributes{
-		Size: uint64(b.size),
+		Size: uint64(size),
 		Mode: 0700,
 		Uid:  fs.uid,
 		Gid:  fs.gid,
@@ -93,7 +91,7 @@ func (fs *fileSystem) LookUpInode(ctx context.Context, op *fuseops.LookUpInodeOp
 	b := fs.nodes[id]
 
 	op.Entry.Child = id
-	op.Entry.Attributes = fs.bufferAttributes(b)
+	op.Entry.Attributes = fs.bufferAttributes(b.size)
 	op.Entry.AttributesExpiration = never
 	return
 }
@@ -113,7 +111,7 @@ func (fs *fileSystem) GetInodeAttributes(ctx context.Context, op *fuseops.GetIno
 			return fuse.ENOENT
 		}
 
-		op.Attributes = fs.bufferAttributes(b)
+		op.Attributes = fs.bufferAttributes(b.size)
 	}
 
 	op.AttributesExpiration = never
@@ -132,6 +130,7 @@ func (fs *fileSystem) OpenFile(ctx context.Context, op *fuseops.OpenFileOp) (err
 		return fuse.EIO
 	}
 
+	op.Handle = fuseops.HandleID(op.Inode)
 	op.KeepPageCache = true
 	return
 }
@@ -141,10 +140,10 @@ func (fs *fileSystem) ReadFile(ctx context.Context, op *fuseops.ReadFileOp) (err
 	b, found := fs.nodes[op.Inode]
 	fs.lock.Unlock()
 	if !found {
-		return fuse.EIO
+		return fuse.ENOENT
 	}
 
-	op.BytesRead = b.copyData(ctx, op.Dst, op.Offset)
+	op.BytesRead, err = b.readAt(adjustLen(op.Dst, op.Offset, b.size), op.Offset)
 	return
 }
 
@@ -153,10 +152,10 @@ func (fs *fileSystem) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) (e
 	b, found := fs.nodes[op.Inode]
 	fs.lock.Unlock()
 	if !found {
-		return fuse.EIO
+		return fuse.ENOENT
 	}
 
-	b.replaceData(op.Offset, op.Data)
+	_, err = b.writeAt(adjustLen(op.Data, op.Offset, b.size), op.Offset)
 	return
 }
 
@@ -165,13 +164,22 @@ func (fs *fileSystem) FlushFile(ctx context.Context, op *fuseops.FlushFileOp) (e
 	_, found := fs.nodes[op.Inode]
 	fs.lock.Unlock()
 	if !found {
-		err = fuse.EIO
+		return fuse.ENOENT
 	}
+
 	return
 }
 
-func (*fileSystem) ReleaseFileHandle(context.Context, *fuseops.ReleaseFileHandleOp) error {
-	return nil
+func (fs *fileSystem) ReleaseFileHandle(ctx context.Context, op *fuseops.ReleaseFileHandleOp) (err error) {
+	fs.lock.Lock()
+	b, found := fs.nodes[fuseops.InodeID(op.Handle)]
+	fs.lock.Unlock()
+	if !found {
+		return fuse.ENOENT
+	}
+
+	err = b.close()
+	return
 }
 
 func (fs *fileSystem) ForgetInode(ctx context.Context, op *fuseops.ForgetInodeOp) (err error) {
@@ -179,4 +187,20 @@ func (fs *fileSystem) ForgetInode(ctx context.Context, op *fuseops.ForgetInodeOp
 		fs.forgetBufferNode(op.Inode)
 	}
 	return
+}
+
+func noWriteAt([]byte, int64) (n int, err error) {
+	err = fuse.ENOSYS
+	return
+}
+
+func noClose() (err error) {
+	return
+}
+
+func adjustLen(ioBuf []byte, ioOffset, availSize int64) []byte {
+	if n := availSize - ioOffset; n < int64(len(ioBuf)) {
+		ioBuf = ioBuf[:n]
+	}
+	return ioBuf
 }

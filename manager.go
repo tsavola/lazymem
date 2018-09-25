@@ -8,8 +8,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
-	"syscall"
 
 	"github.com/jacobsa/fuse"
 	"github.com/jacobsa/fuse/fuseutil"
@@ -62,8 +60,8 @@ func New(ctx context.Context, config *Config) (m *Manager, err error) {
 		OpContext:   ctx,
 		FSName:      "lazymem",
 		Subtype:     "lazymem",
-		ErrorLogger: adaptLogger(config.ErrorLog),
-		DebugLogger: adaptLogger(config.DebugLog),
+		ErrorLogger: adaptLogger(m.ErrorLog),
+		DebugLogger: adaptLogger(m.DebugLog),
 	}
 
 	m.mount, err = fuse.Mount(m.Mountpoint, m.server, &mountConfig)
@@ -90,21 +88,6 @@ func (m *Manager) Shutdown(ctx context.Context) (err error) {
 func (m *Manager) cleanup() (err error) {
 	if m.rmdir {
 		err = os.Remove(m.Mountpoint)
-	}
-	return
-}
-
-// Create a file with given size and data source.  The file descriptor should
-// be passed to another process for memory-mapping.
-func (m *Manager) Create(size int64, mode int, data <-chan Frame) (fd int, err error) {
-	b := newBuffer(size)
-	id, name := m.fs.registerBuffer(b)
-	fd, err = syscall.Open(path.Join(m.Mountpoint, name), mode, 0)
-	m.fs.forgetBufferName(name)
-	if err == nil {
-		go buffering(b, data)
-	} else {
-		m.fs.forgetBufferNode(id)
 	}
 	return
 }
