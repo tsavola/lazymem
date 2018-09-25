@@ -6,6 +6,9 @@ package lazymem
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/binary"
+	mathrand "math/rand"
 	"os"
 	"strconv"
 	"sync"
@@ -27,15 +30,23 @@ type fileSystem struct {
 	nodes  map[fuseops.InodeID]buffer
 	names  map[string]fuseops.InodeID
 	lastId fuseops.InodeID
+	rand   *mathrand.Rand
+	pages  uint64
 }
 
 func newFileSystem() *fileSystem {
+	var seed int64
+	if err := binary.Read(cryptorand.Reader, binary.LittleEndian, &seed); err != nil {
+		panic(err)
+	}
+
 	return &fileSystem{
 		uid:    uint32(os.Getuid()),
 		gid:    uint32(os.Getgid()),
 		nodes:  make(map[fuseops.InodeID]buffer),
 		names:  make(map[string]fuseops.InodeID),
 		lastId: fuseops.RootInodeID,
+		rand:   mathrand.New(mathrand.NewSource(seed)),
 	}
 }
 
@@ -44,7 +55,11 @@ func (fs *fileSystem) registerBuffer(b buffer) (id fuseops.InodeID, name string)
 	defer fs.lock.Unlock()
 
 	id = fs.lastId + 1
-	name = strconv.FormatUint(uint64(id), 36)
+	name = strconv.FormatUint(fs.rand.Uint64(), 36)
+
+	if _, exists := fs.names[name]; exists {
+		panic(name)
+	}
 
 	fs.nodes[id] = b
 	fs.names[name] = id
