@@ -24,9 +24,9 @@ type Config struct {
 type Manager struct {
 	Config
 
-	rmdir  bool
 	fs     *fileSystem
 	server fuse.Server
+	rmdir  bool
 	mount  *fuse.MountedFileSystem
 }
 
@@ -46,15 +46,19 @@ func New(ctx context.Context, config *Config) (m *Manager, err error) {
 		m.Mountpoint = fmt.Sprintf("%s/lazymem/%d", runDir, os.Getpid())
 	}
 
+	m.fs, err = newFileSystem()
+	if err != nil {
+		return
+	}
+
+	m.server = fuseutil.NewFileSystemServer(m.fs)
+
 	err = os.MkdirAll(m.Mountpoint, 0700)
 	if err == nil {
 		m.rmdir = true
 	} else if !os.IsExist(err) {
 		return
 	}
-
-	m.fs = newFileSystem()
-	m.server = fuseutil.NewFileSystemServer(m.fs)
 
 	mountConfig := fuse.MountConfig{
 		OpContext:   ctx,

@@ -41,13 +41,15 @@ type fileSystem struct {
 	pages  uint64
 }
 
-func newFileSystem() *fileSystem {
+func newFileSystem() (fs *fileSystem, err error) {
 	var seed int64
-	if err := binary.Read(cryptorand.Reader, binary.LittleEndian, &seed); err != nil {
-		panic(err)
+
+	err = binary.Read(cryptorand.Reader, binary.LittleEndian, &seed)
+	if err != nil {
+		return
 	}
 
-	return &fileSystem{
+	fs = &fileSystem{
 		uid:    uint32(os.Getuid()),
 		gid:    uint32(os.Getgid()),
 		nodes:  make(map[fuseops.InodeID]buffer),
@@ -55,6 +57,7 @@ func newFileSystem() *fileSystem {
 		lastId: fuseops.RootInodeID,
 		rand:   mathrand.New(mathrand.NewSource(seed)),
 	}
+	return
 }
 
 func (fs *fileSystem) registerBuffer(b buffer) (id fuseops.InodeID, name string) {
