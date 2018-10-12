@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package linear implements ClonedBuffer and SharedBuffer.
 package linear
 
 import (
@@ -11,7 +12,6 @@ import (
 
 const BlockSize = 131072
 
-// Buffer implements ClonedBuffer and SharedBuffer.
 type Buffer struct {
 	linear []byte
 	closed chan struct{}
@@ -22,7 +22,7 @@ type Buffer struct {
 	finish bool
 }
 
-func Buf(linear []byte) (b *Buffer) {
+func NewBuffer(linear []byte) (b *Buffer) {
 	bitLen := (len(linear) + BlockSize - 1) / BlockSize
 	wordLen := (bitLen + 63) / 64
 

@@ -97,7 +97,7 @@ func TestDelay(t *testing.T) {
 		}
 	}()
 
-	buf := sparse.Buf()
+	buf := sparse.NewBuffer()
 	fd, err := mm.CreateTemporal(256*4096, syscall.O_RDONLY, buf)
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func testWrite(t *testing.T, flags int) {
 		}
 	}()
 
-	buf := linear.Buf(make([]byte, 256*4096))
+	buf := linear.NewBuffer(make([]byte, 256*4096))
 	defer func() {
 		<-buf.Closed()
 	}()
@@ -201,7 +201,7 @@ func TestHTTPGet(t *testing.T) {
 		t.Fatal(resp.ContentLength)
 	}
 
-	buf := sparse.Buf()
+	buf := sparse.NewBuffer()
 	fd, err := mm.CreateTemporal(resp.ContentLength, syscall.O_RDONLY, buf)
 	if err != nil {
 		t.Fatal(err)

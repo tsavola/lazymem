@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package sparse implements TemporalBuffer.
 package sparse
 
 import (
@@ -15,7 +16,6 @@ type frame struct {
 	data   []byte
 }
 
-// Buffer implements TemporalBuffer.
 type Buffer struct {
 	lock   sync.Mutex
 	cond   sync.Cond
@@ -23,7 +23,7 @@ type Buffer struct {
 	finish bool
 }
 
-func Buf() (b *Buffer) {
+func NewBuffer() (b *Buffer) {
 	b = new(Buffer)
 	b.cond.L = &b.lock
 	return

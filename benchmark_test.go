@@ -35,7 +35,7 @@ func benchmarkSharedLazymem(b *testing.B, name string) {
 
 	for i := 0; i < b.N; i++ {
 		func() {
-			buf := linear.Buf(data)
+			buf := linear.NewBuffer(data)
 			buf.BlocksPopulated(0, len(data)/linear.BlockSize)
 			buf.PopulationFinished()
 
