@@ -49,7 +49,7 @@ func (m *Manager) Create(size int64, mode int, b SharedBuffer) (fd int, err erro
 // process for mapping.  The memory can be mapped multiple times as
 // PROT_PRIVATE.
 //
-// In case of failure, no ClosedBuffer methods have been invoked.
+// In case of failure, no ClonedBuffer methods have been invoked.
 func (m *Manager) CreateCloned(size int64, mode int, b ClonedBuffer) (fd int, err error) {
 	return m.create(buffer{size, b.ReadAt, noWriteAt, b.Close}, mode)
 }
